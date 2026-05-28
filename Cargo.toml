@@ -1,0 +1,18 @@
+[package]
+name = "vdiff"
+version = "0.1.0"
+edition = "2024"
+description = "A terminal UI for reviewing uncommitted git diffs and copying inline comments for AI agents."
+license = "MIT"
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+clap = { version = "4", features = ["derive"] }
+crossterm = "0.29"
+ratatui = "0.29"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
