@@ -31,9 +31,11 @@ vdiff --context 5 --refresh 1.0 --max-copy-lines 11
 ## Controls
 
 - `j` / `k`: move the selected diff line
+- `Shift-j` / `Shift-k`: extend the selection across multiple diff lines
 - Mouse wheel: scroll
 - Mouse click on a diff line: start a comment for that line
-- `Enter`: start a comment for the selected line
+- Mouse drag across diff lines: select multiple lines; release to comment
+- `Enter`: start a comment for the selected line or selected line range
 - `g` / `G`: jump to top / bottom
 - `r`: refresh immediately
 - `q`: quit
@@ -58,9 +60,10 @@ Comment editor:
 
 The copied text includes:
 
-- file path and target line number
+- file path and target line number or line range
 - the multi-line comment
-- a compact hunk snippet around the selected line
-- a `>> comment:` line inserted immediately after the selected diff line
+- a compact hunk snippet around the selected line or line range
+- a `>> target:` marker before the first selected diff line
+- a `>> comment:` line placed immediately after the selected diff line or selected block
 
 Untracked files are not included yet because `git diff HEAD` does not include them by default.

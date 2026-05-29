@@ -11,21 +11,26 @@ pub fn describe_target(line: &DiffLine) -> String {
 
 pub fn build_review_payload(
     parsed: &ParsedDiff,
-    line: &DiffLine,
+    target_lines: &[DiffLine],
     comment: &str,
     max_hunk_lines: usize,
 ) -> String {
-    let file_path = line.file_path.as_deref().unwrap_or("(unknown file)");
+    let Some(first_line) = target_lines.first() else {
+        return String::new();
+    };
+    let file_path = first_line.file_path.as_deref().unwrap_or("(unknown file)");
     let mut output = vec![
         format!("File: {file_path}"),
-        format!("My comment at line {}", comment_line_number(line)),
+        format!("My comment at {}", comment_line_label(target_lines)),
         String::new(),
     ];
 
-    if let Some(mut hunk_lines) = format_hunk_window(parsed, line, comment, max_hunk_lines) {
+    if let Some(mut hunk_lines) = format_hunk_window(parsed, target_lines, comment, max_hunk_lines)
+    {
         output.append(&mut hunk_lines);
     } else {
-        output.push(line.raw.clone());
+        output.push(">> target:".to_string());
+        output.extend(target_lines.iter().map(|line| line.raw.clone()));
         output.extend(format_comment(comment));
     }
 
@@ -35,24 +40,40 @@ pub fn build_review_payload(
 
 fn format_hunk_window(
     parsed: &ParsedDiff,
-    line: &DiffLine,
+    target_lines: &[DiffLine],
     comment: &str,
     max_hunk_lines: usize,
 ) -> Option<Vec<String>> {
-    let hunk_index = line.hunk_index?;
-    let target_index = line.hunk_line_index?;
+    let first_line = target_lines.first()?;
+    let last_line = target_lines.last()?;
+    let hunk_index = first_line.hunk_index?;
+    if !target_lines
+        .iter()
+        .all(|line| line.hunk_index == Some(hunk_index))
+    {
+        return None;
+    }
+    let target_start = first_line.hunk_line_index?;
+    let target_end = last_line.hunk_line_index?;
+    let (target_start, target_end) = normalized_range(target_start, target_end);
     let hunk = parsed.hunks.get(hunk_index)?;
     let hunk_lines = &hunk.line_indices;
     let max_hunk_lines = max_hunk_lines.max(1);
+    let target_line_count = target_end - target_start + 1;
+    let window_lines = max_hunk_lines.max(target_line_count);
 
-    let (start, end) = if hunk_lines.len() <= max_hunk_lines {
+    let (start, end) = if hunk_lines.len() <= window_lines {
         (0, hunk_lines.len())
     } else {
-        let before = max_hunk_lines.saturating_sub(1) / 2;
-        let mut start = target_index.saturating_sub(before);
-        let mut end = (start + max_hunk_lines).min(hunk_lines.len());
-        start = end.saturating_sub(max_hunk_lines);
-        end = (start + max_hunk_lines).min(hunk_lines.len());
+        let spare = window_lines.saturating_sub(target_line_count);
+        let before = spare / 2;
+        let mut start = target_start.saturating_sub(before);
+        let mut end = (start + window_lines).min(hunk_lines.len());
+        if end <= target_end {
+            end = (target_end + 1).min(hunk_lines.len());
+            start = end.saturating_sub(window_lines);
+        }
+        end = (start + window_lines).min(hunk_lines.len());
         (start, end)
     };
 
@@ -64,9 +85,14 @@ fn format_hunk_window(
     for local_index in start..end {
         let line_index = *hunk_lines.get(local_index)?;
         let current = parsed.lines.get(line_index)?;
-        if local_index == target_index {
+        if local_index == target_start {
+            output.push(">> target:".to_string());
+        }
+        if local_index >= target_start && local_index <= target_end {
             output.push(current.raw.clone());
-            output.extend(format_comment(comment));
+            if local_index == target_end {
+                output.extend(format_comment(comment));
+            }
         } else {
             output.push(current.raw.clone());
         }
@@ -75,11 +101,27 @@ fn format_hunk_window(
     Some(output)
 }
 
-fn comment_line_number(line: &DiffLine) -> String {
+fn comment_line_label(lines: &[DiffLine]) -> String {
+    match lines {
+        [] => "line unknown".to_string(),
+        [line] => format!("line {}", line_number(line)),
+        lines => format!(
+            "lines {}-{}",
+            line_number(lines.first().unwrap()),
+            line_number(lines.last().unwrap())
+        ),
+    }
+}
+
+fn line_number(line: &DiffLine) -> String {
     line.new_lineno
         .or(line.old_lineno)
         .map(|value| value.to_string())
         .unwrap_or_else(|| "unknown".to_string())
+}
+
+fn normalized_range(a: usize, b: usize) -> (usize, usize) {
+    if a <= b { (a, b) } else { (b, a) }
 }
 
 fn format_comment(comment: &str) -> Vec<String> {
@@ -121,11 +163,16 @@ mod tests {
             .find(|line| line.kind == LineKind::Add && line.raw == "+line 10")
             .unwrap();
 
-        let payload =
-            build_review_payload(&parsed, target, "Please revisit this.\nSecond line.", 11);
+        let payload = build_review_payload(
+            &parsed,
+            &[target.clone()],
+            "Please revisit this.\nSecond line.",
+            11,
+        );
 
         assert!(payload.contains("File: big.txt"));
         assert!(payload.contains("My comment at line 10"));
+        assert!(payload.contains(">> target:\n+line 10"));
         assert!(payload.contains("+line 10"));
         assert!(payload.contains(">> comment:\n>> Please revisit this.\n>> Second line."));
         assert!(payload.contains("Second line."));
@@ -142,10 +189,32 @@ mod tests {
             .find(|line| line.kind == LineKind::Add && line.raw == "+line 10")
             .unwrap();
 
-        let payload = build_review_payload(&parsed, target, "Trim this.", 11);
+        let payload = build_review_payload(&parsed, &[target.clone()], "Trim this.", 11);
 
         assert!(payload.contains("+line 10"));
+        assert!(payload.contains(">> target:\n+line 10"));
         assert!(payload.contains(">> comment: Trim this."));
+        assert!(!payload.contains(" line 200"));
+    }
+
+    #[test]
+    fn keeps_all_selected_lines_in_multi_line_payload() {
+        let parsed = parse_unified_diff(&make_diff(200));
+        let targets: Vec<_> = parsed
+            .lines
+            .iter()
+            .filter(|line| {
+                line.hunk_line_index
+                    .is_some_and(|index| (8..=12).contains(&index))
+            })
+            .cloned()
+            .collect();
+
+        let payload = build_review_payload(&parsed, &targets, "Block comment.", 3);
+
+        assert!(payload.contains("My comment at lines 9-13"));
+        assert!(payload.contains(">> target:\n line 9\n+line 10\n line 11\n line 12\n line 13"));
+        assert!(payload.contains(">> comment: Block comment."));
         assert!(!payload.contains(" line 200"));
     }
 }

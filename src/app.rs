@@ -48,7 +48,7 @@ enum RenderRow {
 
 #[derive(Clone, Debug)]
 struct TextEditor {
-    target: DiffLine,
+    target_lines: Vec<DiffLine>,
     lines: Vec<String>,
     cursor_y: usize,
     cursor_x: usize,
@@ -56,9 +56,9 @@ struct TextEditor {
 }
 
 impl TextEditor {
-    fn new(target: DiffLine) -> Self {
+    fn new(target_lines: Vec<DiffLine>) -> Self {
         Self {
-            target,
+            target_lines,
             lines: vec![String::new()],
             cursor_y: 0,
             cursor_x: 0,
@@ -68,6 +68,10 @@ impl TextEditor {
 
     fn text(&self) -> String {
         self.lines.join("\n")
+    }
+
+    fn target_start(&self) -> Option<&DiffLine> {
+        self.target_lines.first()
     }
 
     fn insert_char(&mut self, ch: char) {
@@ -185,6 +189,8 @@ pub struct App {
     rows: Vec<RenderRow>,
     comments: HashMap<String, Vec<InlineComment>>,
     selected_row: Option<usize>,
+    selection_anchor: Option<usize>,
+    mouse_drag_anchor: Option<usize>,
     scroll: usize,
     status: String,
     error: Option<String>,
@@ -207,6 +213,8 @@ impl App {
             rows: Vec::new(),
             comments: HashMap::new(),
             selected_row: None,
+            selection_anchor: None,
+            mouse_drag_anchor: None,
             scroll: 0,
             status: "Loading diff...".to_string(),
             error: None,
@@ -290,6 +298,8 @@ impl App {
     }
 
     fn restore_selection(&mut self, previous_target: Option<&str>) {
+        self.selection_anchor = None;
+        self.mouse_drag_anchor = None;
         if let Some(previous_target) = previous_target {
             for (index, row) in self.rows.iter().enumerate() {
                 if self.row_selectable(row)
@@ -314,6 +324,23 @@ impl App {
         }
     }
 
+    fn current_selection_lines(&self) -> Vec<DiffLine> {
+        let Some(selected) = self.selected_row else {
+            return Vec::new();
+        };
+        let anchor = self.selection_anchor.unwrap_or(selected);
+        let (start, end) = normalized_range(anchor, selected);
+
+        (start..=end)
+            .filter_map(|row_index| match self.rows.get(row_index) {
+                Some(RenderRow::Diff(line_index)) => self.parsed.lines.get(*line_index),
+                Some(RenderRow::Comment(_)) | None => None,
+            })
+            .filter(|line| line.selectable)
+            .cloned()
+            .collect()
+    }
+
     fn selectable_indices(&self) -> Vec<usize> {
         self.rows
             .iter()
@@ -334,6 +361,21 @@ impl App {
         }
     }
 
+    fn is_row_selected(&self, row_index: usize) -> bool {
+        let Some(selected) = self.selected_row else {
+            return false;
+        };
+        let Some(row) = self.rows.get(row_index) else {
+            return false;
+        };
+        if !self.row_selectable(row) {
+            return false;
+        }
+        let anchor = self.selection_anchor.unwrap_or(selected);
+        let (start, end) = normalized_range(anchor, selected);
+        row_index >= start && row_index <= end
+    }
+
     fn row_stable_id(&self, row: &RenderRow) -> Option<String> {
         match row {
             RenderRow::Diff(index) => self.parsed.lines.get(*index).map(DiffLine::stable_id),
@@ -352,9 +394,24 @@ impl App {
                         && self.row_selectable(&self.rows[row_index])
                     {
                         self.selected_row = Some(row_index);
+                        self.selection_anchor = Some(row_index);
+                        self.mouse_drag_anchor = Some(row_index);
                         self.ensure_selection_visible();
-                        self.start_comment();
                     }
+                }
+                MouseEventKind::Drag(MouseButton::Left) => {
+                    if self.mouse_drag_anchor.is_some()
+                        && let Some(row_index) = self.row_at(mouse.row)
+                        && self.row_selectable(&self.rows[row_index])
+                    {
+                        self.selected_row = Some(row_index);
+                        self.ensure_selection_visible();
+                    }
+                }
+                MouseEventKind::Up(MouseButton::Left)
+                    if self.mouse_drag_anchor.take().is_some() =>
+                {
+                    self.start_comment();
                 }
                 _ => {}
             },
@@ -368,6 +425,12 @@ impl App {
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.running = false;
             }
+            KeyCode::Char('J') => self.extend_selection(1),
+            KeyCode::Char('K') => self.extend_selection(-1),
+            KeyCode::Down if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                self.extend_selection(1)
+            }
+            KeyCode::Up if key.modifiers.contains(KeyModifiers::SHIFT) => self.extend_selection(-1),
             KeyCode::Char('j') | KeyCode::Down => self.move_selection(1),
             KeyCode::Char('k') | KeyCode::Up => self.move_selection(-1),
             KeyCode::PageDown => self.scroll_by(self.last_body.height as isize),
@@ -421,6 +484,8 @@ impl App {
     }
 
     fn move_selection(&mut self, delta: isize) {
+        self.selection_anchor = None;
+        self.mouse_drag_anchor = None;
         let selectable = self.selectable_indices();
         if selectable.is_empty() {
             self.selected_row = None;
@@ -436,7 +501,28 @@ impl App {
         self.ensure_selection_visible();
     }
 
+    fn extend_selection(&mut self, delta: isize) {
+        let selectable = self.selectable_indices();
+        if selectable.is_empty() {
+            self.selected_row = None;
+            self.selection_anchor = None;
+            return;
+        }
+
+        let selected = self.selected_row.unwrap_or(selectable[0]);
+        self.selection_anchor.get_or_insert(selected);
+        let current_pos = selectable
+            .iter()
+            .position(|index| *index == selected)
+            .unwrap_or(0);
+        let next_pos = (current_pos as isize + delta).clamp(0, selectable.len() as isize - 1);
+        self.selected_row = Some(selectable[next_pos as usize]);
+        self.ensure_selection_visible();
+    }
+
     fn select_edge(&mut self, first: bool) {
+        self.selection_anchor = None;
+        self.mouse_drag_anchor = None;
         let selectable = self.selectable_indices();
         if selectable.is_empty() {
             return;
@@ -450,16 +536,17 @@ impl App {
     }
 
     fn start_comment(&mut self) {
-        let Some(target) = self.current_line().cloned() else {
+        let target_lines = self.current_selection_lines();
+        let Some(target) = target_lines.first() else {
             self.status = "No diff line selected.".to_string();
             return;
         };
         self.status = format!(
             "Commenting on {}: {}",
             target.file_path.as_deref().unwrap_or("(unknown file)"),
-            describe_target(&target)
+            describe_selection(&target_lines)
         );
-        self.editor = Some(TextEditor::new(target));
+        self.editor = Some(TextEditor::new(target_lines));
     }
 
     fn submit_comment(&mut self) {
@@ -472,10 +559,14 @@ impl App {
             return;
         }
 
-        let target = editor.target;
+        let target_lines = editor.target_lines;
+        let Some(target) = target_lines.first() else {
+            self.status = "No diff line selected.".to_string();
+            return;
+        };
         let payload = build_review_payload(
             &self.parsed,
-            &target,
+            &target_lines,
             &comment_text,
             self.config.max_copy_lines,
         );
@@ -507,7 +598,12 @@ impl App {
         if self.rows.is_empty() {
             self.scroll = 0;
             self.selected_row = None;
+            self.selection_anchor = None;
+            self.mouse_drag_anchor = None;
             return;
+        }
+        if self.mouse_drag_anchor.is_none() {
+            self.selection_anchor = None;
         }
 
         let height = usize::from(self.last_body.height.max(1));
@@ -598,13 +694,14 @@ impl App {
             title_area,
         );
 
-        let detail = self
-            .current_line()
+        let selected_lines = self.current_selection_lines();
+        let detail = selected_lines
+            .first()
             .map(|line| {
                 format!(
                     "{} | {}",
                     line.file_path.as_deref().unwrap_or("(unknown file)"),
-                    describe_target(line)
+                    describe_selection(&selected_lines)
                 )
             })
             .unwrap_or_else(|| "No selectable diff line.".to_string());
@@ -628,7 +725,7 @@ impl App {
                 .filter_map(|offset| {
                     let row_index = self.scroll + offset;
                     let row = self.rows.get(row_index)?;
-                    let selected = self.selected_row == Some(row_index);
+                    let selected = self.is_row_selected(row_index);
                     Some(Line::from(Span::styled(
                         self.row_text(row),
                         self.row_style(row, selected),
@@ -642,7 +739,7 @@ impl App {
 
     fn render_footer(&self, frame: &mut Frame, help_area: Rect, status_area: Rect) {
         let help =
-            " j/k move | wheel scroll | click/Enter comment | Ctrl-D submit | r refresh | q quit ";
+            " j/k move | Shift-j/k select | drag select | Enter comment | Ctrl-D submit | q quit ";
         frame.render_widget(
             Paragraph::new(help).style(Style::default().fg(Color::Black).bg(Color::Gray)),
             help_area,
@@ -689,11 +786,10 @@ impl App {
         let title = format!(
             " Comment: {} | {} ",
             editor
-                .target
-                .file_path
-                .as_deref()
+                .target_start()
+                .and_then(|line| line.file_path.as_deref())
                 .unwrap_or("(unknown file)"),
-            describe_target(&editor.target)
+            describe_selection(&editor.target_lines)
         );
         let block = Block::default()
             .title(title)
@@ -785,6 +881,34 @@ pub fn run_tui(config: AppConfig) -> Result<()> {
     terminal.show_cursor()?;
 
     result
+}
+
+fn normalized_range(a: usize, b: usize) -> (usize, usize) {
+    if a <= b { (a, b) } else { (b, a) }
+}
+
+fn describe_selection(lines: &[DiffLine]) -> String {
+    match lines {
+        [] => "no lines".to_string(),
+        [line] => describe_target(line),
+        lines => {
+            let first = lines.first().unwrap();
+            let last = lines.last().unwrap();
+            format!(
+                "{} lines {}-{}",
+                lines.len(),
+                line_number_label(first),
+                line_number_label(last)
+            )
+        }
+    }
+}
+
+fn line_number_label(line: &DiffLine) -> String {
+    line.new_lineno
+        .or(line.old_lineno)
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "?".to_string())
 }
 
 fn byte_index_for_char(value: &str, char_index: usize) -> usize {
