@@ -142,10 +142,7 @@ fn synthesize_untracked_diff(
             text: skipped_untracked_diff(
                 path,
                 file_mode(&metadata),
-                &format!(
-                    "larger than --max-untracked-bytes ({})",
-                    max_untracked_bytes
-                ),
+                &format!("larger than --max-untracked-bytes ({max_untracked_bytes})"),
             ),
             error: None,
         };
