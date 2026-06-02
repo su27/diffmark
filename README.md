@@ -4,6 +4,8 @@
 
 It watches staged and unstaged tracked changes, and shows untracked files by default.
 
+<img width="2126" height="1239" alt="diffmark" src="https://github.com/user-attachments/assets/8f30ab4d-4f76-40ee-a291-1547d03b9944" />
+
 Repository: <https://github.com/su27/diffmark>
 
 ## Install
