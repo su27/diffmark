@@ -235,11 +235,11 @@ fn skipped_untracked_diff(path: &str, mode: &'static str, reason: &str) -> Strin
     output
 }
 
-fn file_mode(metadata: &fs::Metadata) -> &'static str {
+fn file_mode(_metadata: &fs::Metadata) -> &'static str {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        if metadata.permissions().mode() & 0o111 != 0 {
+        if _metadata.permissions().mode() & 0o111 != 0 {
             return "100755";
         }
     }
