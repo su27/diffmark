@@ -1,6 +1,6 @@
 [package]
 name = "diffmark"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.88"
 description = "A terminal UI for reviewing uncommitted git diffs and copying inline comments for AI agents."
@@ -23,3 +23,8 @@ ratatui = "0.29"
 lto = true
 codegen-units = 1
 strip = true
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"

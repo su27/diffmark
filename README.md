@@ -10,11 +10,27 @@ Repository: <https://github.com/su27/diffmark>
 
 ## Install
 
+Prebuilt installers are available from GitHub Releases.
+
+Linux/macOS:
+
+```sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/su27/diffmark/releases/latest/download/diffmark-installer.sh | sh
+```
+
+Windows PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/su27/diffmark/releases/latest/download/diffmark-installer.ps1 | iex"
+```
+
+Rust users can also build from crates.io:
+
 ```sh
 cargo install diffmark
 ```
 
-`diffmark` requires Rust 1.88 or newer.
+Building from source requires Rust 1.88 or newer.
 
 For local development:
 
