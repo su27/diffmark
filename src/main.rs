@@ -59,20 +59,32 @@ fn main() {
 fn run() -> anyhow::Result<i32> {
     let args = Args::parse();
 
+    if let Some(code) = validation_error_code(&args) {
+        return Ok(code);
+    }
+
+    app::run_tui(app_config(args))?;
+    Ok(0)
+}
+
+fn validation_error_code(args: &Args) -> Option<i32> {
     if args.refresh <= 0.0 {
         eprintln!("diffmark: --refresh must be > 0");
-        return Ok(2);
+        return Some(2);
     }
     if args.max_copy_lines == 0 {
         eprintln!("diffmark: --max-copy-lines must be > 0");
-        return Ok(2);
+        return Some(2);
     }
     if !git_diff::is_git_repo() {
         eprintln!("diffmark: not inside a git work tree");
-        return Ok(2);
+        return Some(2);
     }
+    None
+}
 
-    app::run_tui(app::AppConfig {
+fn app_config(args: Args) -> app::AppConfig {
+    app::AppConfig {
         diff: DiffOptions {
             context: args.context,
             include_untracked: !args.no_untracked,
@@ -82,6 +94,5 @@ fn run() -> anyhow::Result<i32> {
         refresh_interval: std::time::Duration::from_secs_f64(args.refresh),
         max_copy_lines: args.max_copy_lines,
         allow_osc52: !args.no_osc52,
-    })?;
-    Ok(0)
+    }
 }
