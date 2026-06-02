@@ -1,9 +1,16 @@
 [package]
-name = "vdiff"
+name = "diffmark"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.88"
 description = "A terminal UI for reviewing uncommitted git diffs and copying inline comments for AI agents."
 license = "MIT"
+readme = "README.md"
+repository = "https://github.com/su27/diffmark"
+homepage = "https://github.com/su27/diffmark"
+documentation = "https://docs.rs/diffmark"
+keywords = ["git", "diff", "tui", "review", "ai"]
+categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 anyhow = "1"

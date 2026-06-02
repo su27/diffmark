@@ -29,7 +29,7 @@ pub fn copy_to_clipboard(text: &str, allow_osc52: bool) -> ClipboardResult {
         };
     }
 
-    let fallback = env::temp_dir().join("vdiff-last-comment.txt");
+    let fallback = env::temp_dir().join("diffmark-last-comment.txt");
     if let Err(err) = fs::write(&fallback, text) {
         return ClipboardResult {
             ok: false,
@@ -49,11 +49,11 @@ pub fn copy_to_clipboard(text: &str, allow_osc52: bool) -> ClipboardResult {
 fn candidate_methods() -> Vec<String> {
     let mut methods = Vec::new();
     if is_wsl() {
-        if command_exists("powershell.exe") {
-            methods.push("powershell.exe".to_string());
-        }
         if command_exists("clip.exe") {
             methods.push("clip.exe".to_string());
+        }
+        if command_exists("powershell.exe") {
+            methods.push("powershell.exe".to_string());
         }
     }
 
