@@ -6,8 +6,8 @@ use anyhow::Result;
 use crossterm::{
     cursor,
     event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
-        MouseButton, MouseEventKind,
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
+        KeyModifiers, MouseButton, MouseEventKind,
     },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
@@ -412,7 +412,7 @@ impl App {
 
     fn handle_normal_event(&mut self, event: Event) {
         match event {
-            Event::Key(key) => self.handle_normal_key(key),
+            Event::Key(key) if is_key_action(key) => self.handle_normal_key(key),
             Event::Mouse(mouse) => match mouse.kind {
                 MouseEventKind::ScrollUp => self.scroll_by(-3),
                 MouseEventKind::ScrollDown => self.scroll_by(3),
@@ -483,7 +483,9 @@ impl App {
     }
 
     fn handle_editor_event(&mut self, event: Event) {
-        if let Event::Key(key) = event {
+        if let Event::Key(key) = event
+            && is_key_action(key)
+        {
             self.handle_editor_key(key);
         }
     }
@@ -1141,6 +1143,10 @@ fn normalized_range(a: usize, b: usize) -> (usize, usize) {
     if a <= b { (a, b) } else { (b, a) }
 }
 
+fn is_key_action(key: KeyEvent) -> bool {
+    !matches!(key.kind, KeyEventKind::Release)
+}
+
 fn describe_selection(lines: &[DiffLine]) -> String {
     match lines {
         [] => "no lines".to_string(),
@@ -1377,5 +1383,30 @@ mod tests {
         let editor = app.editor.as_ref().unwrap();
         assert_eq!(editor.lines, vec![""]);
         assert_eq!(editor.target_lines.len(), 2);
+    }
+
+    #[test]
+    fn key_release_events_are_ignored() {
+        let mut app = test_app();
+        app.parsed = sample_diff();
+        app.rebuild_rows();
+        app.selected_row = app.selectable_indices().first().copied();
+
+        app.handle_normal_event(Event::Key(KeyEvent::new_with_kind(
+            KeyCode::Enter,
+            KeyModifiers::NONE,
+            KeyEventKind::Release,
+        )));
+        assert!(app.editor.is_none());
+
+        app.start_comment();
+        assert!(app.editor.is_some());
+        app.handle_editor_event(Event::Key(KeyEvent::new_with_kind(
+            KeyCode::Esc,
+            KeyModifiers::NONE,
+            KeyEventKind::Release,
+        )));
+        assert!(app.editor.is_some());
+        assert!(app.running);
     }
 }
